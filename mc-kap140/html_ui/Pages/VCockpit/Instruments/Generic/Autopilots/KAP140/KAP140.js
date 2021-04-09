@@ -40,6 +40,7 @@ class KAP140 extends BaseInstrument {
     forceVSCapture() {
         // When autopilot is enabled, capture that vertical speed and allow the plane to travel that direction forever.
         var fpm = SimVar.GetSimVarValue("VERTICAL SPEED", "feet per second") * 60;
+        fpm = this.getValidatedVS(fpm);
         // 64k feet ought to be enough for everybody
         // More seriously, the max height in the sim is 275k and the min height is ???. The autopilot can't be set to ranges outside of U16, apparently:
         // https://forum.simflight.com/topic/70702-help-with-altitude-hold/?do=findComment&comment=437414
@@ -48,6 +49,17 @@ class KAP140 extends BaseInstrument {
         SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", fpm);
         SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
         this.AltitudeArmed = false;
+    }
+    getValidatedVS(currVSpeed) {
+        // what happens in real AP when vs is outside of limits?
+        // VS limits could be dependant on aircraft type:
+        if (currVSpeed < -1500.0) {
+            currVSpeed = -1500;
+        }
+        if (currVSpeed > 700.0) {
+            currVSpeed = 700;
+        }
+        return currVSpeed; 
     }    
     onInteractionEvent(_args) {
         if (this.isElectricityAvailable()) {
