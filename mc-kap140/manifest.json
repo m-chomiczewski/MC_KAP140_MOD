@@ -1,0 +1,16 @@
+{
+  "dependencies": [],
+  "content_type": "CUSTOM",
+  "title": "MC KAP140 Mod",
+  "manufacturer": "KAP140",
+  "creator": "MC",
+  "package_version": "0.0.01",
+  "minimum_game_version": "1.9.3",
+  "release_notes": {
+    "neutral": {
+      "LastUpdate": "",
+      "OlderHistory": ""
+    }
+  },
+  "total_package_size": "65737"
+}
