@@ -13,6 +13,8 @@ class KAP140 extends BaseInstrument {
         this.BaroMode = 0;
         // Whether altitude preselect has been armed.
         this.AltitudeArmed = false;
+        this.AltitudeChangingTo = -1;
+        this.AltitudeChanging = false;
         // The value of the altitude alerter. Note that the display on the KAP140 is an altitude alert display, not an altitude selection display. It just so happens that on some models/installations you can have it hold at the altitude shown in the display. When altitude preselect has been armed, the value shown in the display will be copied as the altitude selection.
         this.AltitudeAlerterAltitude = 0;
     }
@@ -45,7 +47,9 @@ class KAP140 extends BaseInstrument {
         // More seriously, the max height in the sim is 275k and the min height is ???. The autopilot can't be set to ranges outside of U16, apparently:
         // https://forum.simflight.com/topic/70702-help-with-altitude-hold/?do=findComment&comment=437414
         // Basically, just work around the fact that you can't actually set a pure vertical speed mode. Instead, we use a workaround of setting a height that is obviously too high or too low.
-        SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", 60000 * (fpm > 0 ? 1 : 0));
+        //SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", 60000 * (fpm > 0 ? 1 : 0));
+        // MC use a more reasonable value
+        SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", this.getReasonableAltitudeValue() * (fpm > 0 ? 1 : 0));
         SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", fpm);
         SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
         this.AltitudeArmed = false;
@@ -61,6 +65,9 @@ class KAP140 extends BaseInstrument {
         }
         return currVSpeed; 
     }    
+    getReasonableAltitudeValue() {
+        return SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") + 1000;
+    }
     onInteractionEvent(_args) {
         if (this.isElectricityAvailable()) {
             switch (_args[0]) {
@@ -76,14 +83,14 @@ class KAP140 extends BaseInstrument {
                     }
                     break;
                 case "KAP140_Push_HDG":
-                    if (SimVar.GetSimVarValue("AUTOPILOT MASTER", "Bool")) {
+                    //if (SimVar.GetSimVarValue("AUTOPILOT MASTER", "Bool")) { // MC pressing HDG actually engages autopilot and puts it in HDG mode
                         if (SimVar.GetSimVarValue("AUTOPILOT HEADING LOCK", "Bool")) {
                             SimVar.SetSimVarValue("K:AP_HDG_HOLD_OFF", "number", 0);
                         }
                         else {
                             SimVar.SetSimVarValue("K:AP_HDG_HOLD_ON", "number", 0);
                         }
-                    }
+                    //} // MC 
                     break;
                 case "KAP140_Push_NAV":
                     if (SimVar.GetSimVarValue("AUTOPILOT MASTER", "Bool")) {
@@ -105,7 +112,9 @@ class KAP140 extends BaseInstrument {
                     if (SimVar.GetSimVarValue("AUTOPILOT MASTER", "Bool")) {
                         if (SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK", "Bool")) {
                             var fpm = SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD VAR", "feet/minute");
-                            SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", 60000 * (fpm > 0 ? 1 : 0));                            
+                            //SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", 60000 * (fpm > 0 ? 1 : 0));
+                            // MC use a more reasonable value
+                            SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", this.getReasonableAltitudeValue() * (fpm > 0 ? 1 : 0));               
                             SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
                             this.RightBlockReinitTime = 3000;
                             this.RightBlockCurrDisplay = 1;
@@ -116,8 +125,31 @@ class KAP140 extends BaseInstrument {
                     }
                     break;
                 case "KAP140_Push_UP":
-                    if (!SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD", "Bool")) {
-                        Coherent.call("AP_ALT_VAR_SET_ENGLISH", 2, SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") + 20, false);
+                    if (this.AltitudeChanging || !SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD", "Bool")) {
+                        // MC Coherent.call seems to occaionally command massive vertical speed increases leading to stall
+                        // replaced with hackish logic with the idea that some functionality is better than none
+                        // (even if it does not match real KAP140)
+                        //Coherent.call("AP_ALT_VAR_SET_ENGLISH", 2, SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") + 20, false);
+                        // MC since we can't increase altitude by 20 ft, instead increasing by 100
+                        // if button is pressed again while previously commanded climb is still ongoing,
+                        // add another 100 ft to requested altitude
+                        if(this.AltitudeChanging){
+                            this.AltitudeChangingTo = SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") + 100;
+                            if(SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD VAR", "feet/minute") <= 0 &&  this.AltitudeChangingTo >= SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet")) {
+                                this.AltitudeChanging = false;
+                                SimVar.SetSimVarValue("K:AP_ALT_HOLD", "number", 0);
+                                break;
+                            }                              
+                        }
+                        else{
+                            this.AltitudeChangingTo = SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") + 100;
+                            SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", 500);
+                            SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
+                            this.RightBlockReinitTime = 3000;
+                            this.RightBlockCurrDisplay = 1;
+                            this.AltitudeChanging = true;
+                        }
+                        SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", this.AltitudeChangingTo);
                     }
                     else {
                         if (this.RightBlockCurrDisplay != 1) {
@@ -130,8 +162,31 @@ class KAP140 extends BaseInstrument {
                     }
                     break;
                 case "KAP140_Push_DN":
-                    if (!SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD", "Bool")) {
-                        Coherent.call("AP_ALT_VAR_SET_ENGLISH", 2, SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") - 20, false);
+                    if (this.AltitudeChanging || !SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD", "Bool")) {
+                        // MC Coherent.call seems to occaionally command massive vertical speed increases leading to stall
+                        // replaced with hackish logic with the idea that some functionality is better than none
+                        // (even if it does not match real KAP140)                        
+                        //Coherent.call("AP_ALT_VAR_SET_ENGLISH", 2, SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") - 20, false);
+                        // MC since we can't increase altitude by 20 ft, instead increasing by 100
+                        // if button is pressed again while previously commanded climb is still ongoing,
+                        // add another 100 ft to requested altitude
+                        if(this.AltitudeChanging){
+                            this.AltitudeChangingTo = SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK VAR", "feet") - 100;
+                            if(SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD VAR", "feet/minute") >= 0 &&  this.AltitudeChangingTo <= SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet")) {
+                                this.AltitudeChanging = false;
+                                SimVar.SetSimVarValue("K:AP_ALT_HOLD", "number", 0);
+                                break;
+                            }                             
+                        }
+                        else{
+                            this.AltitudeChangingTo = SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") % 100 > 50 ? SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") - (SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") % 100):  SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") - (SimVar.GetSimVarValue("INDICATED ALTITUDE:2", "feet") % 100) - 100;
+                            SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", -500);
+                            SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
+                            this.RightBlockReinitTime = 3000;
+                            this.RightBlockCurrDisplay = 1;
+                            this.AltitudeChanging = true;
+                        }
+                        SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", (this.AltitudeChangingTo > 0 ? this.AltitudeChangingTo : 100) );
                     }
                     else {
                         if (this.RightBlockCurrDisplay != 1) {
@@ -224,15 +279,19 @@ class KAP140 extends BaseInstrument {
                             this.AltitudeArmed = true;
                             armedAltitude = true;
                         }
+                        var fpm = SimVar.GetSimVarValue("AUTOPILOT VERTICAL HOLD VAR", "feet/minute");
                         // If altitude is armed, then adjust the autopilot altitude lock var.
                         if (this.AltitudeArmed) {
                             SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number", this.AltitudeAlerterAltitude);
+                            SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", fpm); // MC: replace 0 with fpm?
                         }
                         // If we ourselves armed altitude, then additionally set the fpm to 0 and put ourselves in VS mode.
                         // TODO do not reset FPM.
                         if (armedAltitude) {
                             //SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", 0);
-                            SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0);
+                            //SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", 0); // MC: replace 0 with fpm?
+                            //SimVar.SetSimVarValue("K:AP_VS_VAR_SET_ENGLISH", "number", fpm);
+                            SimVar.SetSimVarValue("K:AP_PANEL_VS_ON", "number", fpm); // MC: replace 0 with fpm?
                         }
                     }
                     break;
@@ -301,9 +360,15 @@ class KAP140 extends BaseInstrument {
                 this.RightBlockReinitTime = 3000;
                 this.RightBlockCurrDisplay = 1;
             }
+            // MC set alt to someting reasonable
+            if(this.isAutopilotEngaged() && !this.AltitudeArmed && this.PitchMode == 1 && !this.AltitudeChanging ){
+                var fpm = SimVar.GetSimVarValue("VERTICAL SPEED", "feet per second") * 60;
+                SimVar.SetSimVarValue("K:AP_ALT_VAR_SET_ENGLISH", "number",this.getReasonableAltitudeValue() * (fpm > 0 ? 1 : 0));
+            } 
             if (!this.isAutopilotEngaged()) {
                 // Another random hack. Don't know how to listen for events so just randomly extinguish the annunciator here.
                 this.AtltitudeArmed = false;
+                this.AltitudeChanging = false; //MC
             }
             this.LeftDisplayTop.textContent = this.getActiveRollMode();
             var armedRoll = this.getArmedRollMode();
@@ -322,6 +387,12 @@ class KAP140 extends BaseInstrument {
             if (this.AltitudeArmed) {
                 if (SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK", "Bool")) {
                     this.AltitudeArmed = false;
+                }
+            }
+            //MC same for chaning altitude situation
+            if (this.AltitudeChanging) {
+                if (SimVar.GetSimVarValue("AUTOPILOT ALTITUDE LOCK", "Bool")) {
+                    this.AltitudeChanging = false;
                 }
             }
             var armedPitch = this.AltitudeArmed;
@@ -384,7 +455,7 @@ class KAP140 extends BaseInstrument {
                 this.UPArrow.style.visibility = "hidden";
                 this.DownArrow.style.visibility = "hidden";
             }
-            // I have no idea why this is here. IF FALSE? Is that some JS idiom?
+            // MC I have no idea why this is here. IF FALSE? Is that some JS idiom?
             if (false) {
                 this.LeftDisplayTop.textContent = ("" + SimVar.GetSimVarValue("AUTOPILOT HEADING LOCK", "Bool")) + " " + SimVar.GetSimVarValue("AUTOPILOT WING LEVELER", "Bool");
                 this.LeftDisplayBot.textContent =  ("" + SimVar.GetSimVarValue("AUTOPILOT APPROACH HOLD", "Bool")) + " " + SimVar.GetSimVarValue("AUTOPILOT NAV1 LOCK", "Bool");
