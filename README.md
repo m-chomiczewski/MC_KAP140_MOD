@@ -13,9 +13,9 @@ Version history:
 
 v. 0.0.03:
 
-- Attempt at fixing up / down button functionality when in ALT mode (alt +/- 100 ft because +/- 20 ft is not currently possible)
+- Attempt at fixing up / down button functionality when in ALT mode (alt +/- 100 ft because +/- 20 ft is not currently possible);
 - Pressing HDG button turn autopilot on and puts it in HDG and VS modes
-- When in VS mode, code now incements target altitude dynmically to be 1000 ft +/- current altitude instead of 60,000 ft
+- When in VS mode, code now incements target altitude dynmically to be 1000 ft +/- current altitude instead of 60,000 ft /  0 ft
  
 v. 0.0.02:
 
